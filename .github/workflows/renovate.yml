@@ -1,0 +1,42 @@
+name: Renovate Manual Scan
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Renovate
+        uses: renovatebot/github-action@v41.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          configurationFile: .github/renovate.json
+        env:
+          LOG_LEVEL: info
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+
+      - name: Save report
+        if: always()
+        run: |
+          mkdir -p reports
+          echo "Repository: ${{ github.repository }}" > reports/renovate-report.txt
+          echo "Triggered by: ${{ github.actor }}" >> reports/renovate-report.txt
+          echo "Date: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> reports/renovate-report.txt
+          echo "Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> reports/renovate-report.txt
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renovate-report
+          path: reports/
