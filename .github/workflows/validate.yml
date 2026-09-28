@@ -1,0 +1,34 @@
+name: Validate
+
+on:
+  pull_request:
+
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Validate JSON
+        run: |
+          python scripts/validate_json.py
+
+      - name: Validate YAML
+        run: |
+          python scripts/validate_yaml.py
