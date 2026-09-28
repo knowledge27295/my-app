@@ -1,42 +1,95 @@
-name: Renovate Manual Scan
+name: Renovate
 
 on:
   workflow_dispatch:
 
+  schedule:
+    - cron: "17 3 * * 1"
+
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  id-token: write
+  contents: read
 
 jobs:
   renovate:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_RENOVATE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: renovate-${{ github.run_id }}
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+      - name: Get Renovate GitHub App secret
+        id: secret
+        shell: bash
+        env:
+          SECRET_ARN: ${{ vars.RENOVATE_SECRET_ARN }}
+        run: |
+          set -euo pipefail
+
+          SECRET_JSON="$(aws secretsmanager get-secret-value \
+            --secret-id "$SECRET_ARN" \
+            --query SecretString \
+            --output text)"
+
+          APP_ID="$(jq -er '.app_id | tostring' <<< "$SECRET_JSON")"
+          INSTALLATION_ID="$(jq -er '.installation_id | tostring' <<< "$SECRET_JSON")"
+          PRIVATE_KEY="$(jq -er '.private_key' <<< "$SECRET_JSON")"
+
+          echo "::add-mask::$APP_ID"
+          echo "::add-mask::$INSTALLATION_ID"
+          echo "::add-mask::$PRIVATE_KEY"
+
+          echo "app_id=$APP_ID" >> "$GITHUB_OUTPUT"
+          echo "installation_id=$INSTALLATION_ID" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "private_key<<EOF"
+            printf '%s\n' "$PRIVATE_KEY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ steps.secret.outputs.app_id }}
+          private-key: ${{ steps.secret.outputs.private_key }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-checks: write
+          permission-statuses: write
+          permission-workflows: write
+          permission-administration: read
+          permission-vulnerability-alerts: read
+          permission-members: read
+          permission-metadata: read
+
+      - name: Verify GitHub App installation
+        env:
+          EXPECTED: ${{ steps.secret.outputs.installation_id }}
+          ACTUAL: ${{ steps.app-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+
+          test "$EXPECTED" = "$ACTUAL"
+
+          echo "GitHub App installation verified."
 
       - name: Run Renovate
-        uses: renovatebot/github-action@v41.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          configurationFile: .github/renovate.json
+        uses: renovatebot/github-action@v46.2.2
         env:
-          LOG_LEVEL: info
+          RENOVATE_TOKEN: ${{ steps.app-token.outputs.token }}
           RENOVATE_REPOSITORIES: ${{ github.repository }}
-
-      - name: Save report
-        if: always()
-        run: |
-          mkdir -p reports
-          echo "Repository: ${{ github.repository }}" > reports/renovate-report.txt
-          echo "Triggered by: ${{ github.actor }}" >> reports/renovate-report.txt
-          echo "Date: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> reports/renovate-report.txt
-          echo "Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> reports/renovate-report.txt
-
-      - name: Upload report artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: renovate-report
-          path: reports/
+          LOG_LEVEL: info
