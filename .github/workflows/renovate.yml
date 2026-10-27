@@ -25,15 +25,16 @@ jobs:
           role-to-assume: ${{ vars.AWS_RENOVATE_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # Step 3: Read the GitHub App credentials from AWS Secrets Manager
+      # Step 3: Read GitHub App credentials from AWS Secrets Manager
       - name: Read GitHub App secret
         id: app-secret
         shell: bash
+        env:
+          SECRET_FILE: ${{ runner.temp }}/renovate-secret.json
         run: |
           set -euo pipefail
           umask 077
 
-          SECRET_FILE="$(mktemp)"
           trap 'rm -f "$SECRET_FILE"' EXIT
 
           aws secretsmanager get-secret-value \
@@ -59,10 +60,9 @@ jobs:
             .replace(/\\n/g, '\n')
             .trim();
 
-          // Validate the private key without printing it.
+          // Validate private key without printing it.
           crypto.createPrivateKey(key);
 
-          // Export values safely for the next GitHub Actions step.
           const delimiter = `GHAPP_${crypto.randomUUID()}`;
 
           fs.appendFileSync(
@@ -78,10 +78,10 @@ jobs:
             ].join('\n')
           );
 
-          console.log('GitHub App credentials loaded; private key validated.');
+          console.log(
+            'GitHub App credentials loaded and private key validated.'
+          );
           NODE
-        env:
-          SECRET_FILE: ${{ runner.temp }}/renovate-secret.json
 
       # Step 4: Generate a repository-scoped GitHub App token
       - name: Generate GitHub App token
@@ -93,11 +93,11 @@ jobs:
           owner: knowledge27295
           repositories: my-app
 
-      # Step 5: Run Renovate
+      # Step 5: Run Renovate with debug logging
       - name: Run Renovate
         uses: renovatebot/github-action@v46.3.7
         with:
           token: ${{ steps.app-token.outputs.token }}
         env:
           RENOVATE_REPOSITORIES: knowledge27295/my-app
-          LOG_LEVEL: info
+          LOG_LEVEL: debug
