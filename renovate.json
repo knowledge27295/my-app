@@ -1,3 +1,4 @@
+
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
@@ -6,5 +7,16 @@
   "dependencyDashboard": true,
   "prConcurrentLimit": 5,
   "prHourlyLimit": 2,
-  "rangeStrategy": "auto"
+  "rangeStrategy": "auto",
+  "packageRules": [
+    {
+      "matchDatasources": [
+        "maven"
+      ],
+      "registryUrls": [
+        "http://56.10.186.1:8081/artifactory/renovate-maven",
+        "https://repo.maven.apache.org/maven2/"
+      ]
+    }
+  ]
 }
