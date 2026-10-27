@@ -10,53 +10,90 @@ permissions:
 
 jobs:
   renovate:
+    name: Run Renovate
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Step 2: Authenticate to AWS using GitHub OIDC
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_RENOVATE_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
+      # Step 3: Read the GitHub App credentials from AWS Secrets Manager
       - name: Read GitHub App secret
-        uses: aws-actions/aws-secretsmanager-get-secrets@v2
-        with:
-          secret-ids: RENOVATE_GITHUB_APP,renovate/github-app
-          parse-json-secrets: true
-
-      - name: Validate GitHub App private key format
-        env:
-          PRIVATE_KEY: ${{ env.RENOVATE_GITHUB_APP_PRIVATE_KEY }}
+        id: app-secret
+        shell: bash
         run: |
+          set -euo pipefail
+          umask 077
+
+          SECRET_FILE="$(mktemp)"
+          trap 'rm -f "$SECRET_FILE"' EXIT
+
+          aws secretsmanager get-secret-value \
+            --secret-id renovate/github-app \
+            --query SecretString \
+            --output text > "$SECRET_FILE"
+
           node <<'NODE'
+          const fs = require('fs');
           const crypto = require('crypto');
 
-          let key = process.env.PRIVATE_KEY || '';
-          key = key.replace(/\\n/g, '\n').trim();
+          const secret = JSON.parse(
+            fs.readFileSync(process.env.SECRET_FILE, 'utf8')
+          );
 
-          try {
-            crypto.createPrivateKey(key);
-            console.log('Private key format: VALID');
-          } catch (error) {
-            console.log('Private key format: INVALID');
-            console.log('Error code:', error.code);
-            process.exit(1);
+          if (!secret.app_id || !secret.private_key) {
+            throw new Error(
+              'Required GitHub App fields are missing from AWS Secrets Manager.'
+            );
           }
-          NODE
 
+          const key = secret.private_key
+            .replace(/\\n/g, '\n')
+            .trim();
+
+          // Validate the private key without printing it.
+          crypto.createPrivateKey(key);
+
+          // Export values safely for the next GitHub Actions step.
+          const delimiter = `GHAPP_${crypto.randomUUID()}`;
+
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            [
+              `app_id<<${delimiter}`,
+              String(secret.app_id),
+              delimiter,
+              `private_key<<${delimiter}`,
+              key,
+              delimiter,
+              ''
+            ].join('\n')
+          );
+
+          console.log('GitHub App credentials loaded; private key validated.');
+          NODE
+        env:
+          SECRET_FILE: ${{ runner.temp }}/renovate-secret.json
+
+      # Step 4: Generate a repository-scoped GitHub App token
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ env.RENOVATE_GITHUB_APP_APP_ID }}
-          private-key: ${{ env.PRIVATE_KEY }}
+          app-id: ${{ steps.app-secret.outputs.app_id }}
+          private-key: ${{ steps.app-secret.outputs.private_key }}
           owner: knowledge27295
           repositories: my-app
 
+      # Step 5: Run Renovate
       - name: Run Renovate
         uses: renovatebot/github-action@v46.3.7
         with:
