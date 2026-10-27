@@ -11,6 +11,7 @@ permissions:
 jobs:
   renovate:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,12 +28,32 @@ jobs:
           secret-ids: RENOVATE_GITHUB_APP,renovate/github-app
           parse-json-secrets: true
 
+      - name: Validate GitHub App private key format
+        env:
+          PRIVATE_KEY: ${{ env.RENOVATE_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          node <<'NODE'
+          const crypto = require('crypto');
+
+          let key = process.env.PRIVATE_KEY || '';
+          key = key.replace(/\\n/g, '\n').trim();
+
+          try {
+            crypto.createPrivateKey(key);
+            console.log('Private key format: VALID');
+          } catch (error) {
+            console.log('Private key format: INVALID');
+            console.log('Error code:', error.code);
+            process.exit(1);
+          }
+          NODE
+
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ env.RENOVATE_GITHUB_APP_APP_ID }}
-          private-key: ${{ env.RENOVATE_GITHUB_APP_PRIVATE_KEY }}
+          private-key: ${{ env.PRIVATE_KEY }}
           owner: knowledge27295
           repositories: my-app
 
