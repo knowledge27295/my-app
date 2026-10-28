@@ -86,7 +86,7 @@ jobs:
       # Step 4: Generate a repository-scoped GitHub App token
       - name: Generate GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ steps.app-secret.outputs.app_id }}
           private-key: ${{ steps.app-secret.outputs.private_key }}
